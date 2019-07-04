@@ -5,6 +5,7 @@ defmodule TTFMetrics do
   This is based on the Ruby TTFunk gem.
   """
 
+  alias TTFMetrics.Directory
   defstruct [:ascent]
 
   @doc """
@@ -12,12 +13,15 @@ defmodule TTFMetrics do
 
   ## Examples
 
-      iex> TTFMetrics.parse("font_file")
+      iex> TTFMetrics.parse("test/fonts/DejaVuSans.ttf")
       {:ok, %TTFMetrics{}}
 
   """
   def parse(font_file) do
-    contents = File.read(font_file)
+    contents = File.read!(font_file)
+
+    IO.inspect(Directory.parse(contents))
+
     {:ok, %TTFMetrics{}}
   end
 end
