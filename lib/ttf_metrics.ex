@@ -39,5 +39,9 @@ defmodule TTFMetrics do
     Table.OS2.parse(data)
   end
 
+  defp parse_table("hhea", data) do
+    Table.Hhea.parse(data)
+  end
+
   defp parse_table(_, _), do: %{}
 end
