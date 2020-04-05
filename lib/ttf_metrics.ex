@@ -40,6 +40,10 @@ defmodule TTFMetrics do
     Table.Hhea.parse(data)
   end
 
+  defp parse_table("name", data) do
+    Table.Name.parse(data)
+  end
+
   defp parse_table(_, _), do: %{}
 
   defp ascent(%{"OS/2" => os2, "hhea" => hhea}) do

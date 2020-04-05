@@ -9,8 +9,8 @@ defmodule TTFMetricsTest do
     {:ok, font1: font1, font2: font2}
   end
 
-  test "returns a %TTFMetrics{}", %{font1: font} do
-    assert %TTFMetrics{} = font
+  test "returns a %TTFMetrics{}" do
+    assert {:ok, %TTFMetrics{}} = TTFMetrics.parse("test/fonts/DejaVuSans.ttf")
   end
 
   test "has an ascent", %{font1: font1, font2: font2} do
