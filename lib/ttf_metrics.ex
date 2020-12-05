@@ -9,6 +9,8 @@ defmodule TTFMetrics do
   alias TTFMetrics.Table
   defstruct [:ascent, :descent, :line_gap]
 
+  @type t :: any()
+
   @spec parse(String.t()) :: {:ok, TTFMetrics.t()}
   def parse(font_file) do
     contents = File.read!(font_file)
@@ -21,8 +23,6 @@ defmodule TTFMetrics do
         <<_::binary-size(offset), part::binary-size(length), _::binary>> = contents
         Map.put(acc, table, parse_table(table, part))
       end)
-
-    IO.inspect(tables)
 
     {:ok,
      %TTFMetrics{
@@ -42,6 +42,10 @@ defmodule TTFMetrics do
 
   defp parse_table("name", data) do
     Table.Name.parse(data)
+  end
+
+  defp parse_table("cmap", data) do
+    Table.CMap.parse(data)
   end
 
   defp parse_table(_, _), do: %{}
