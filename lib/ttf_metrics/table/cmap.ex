@@ -1,126 +1,138 @@
-defmodule TTFMetrics.Table.CMap do
-  def parse(<<version::size(16), table_count::size(16), tables::binary>>) do
-    {tables, _} = Enum.reduce(1..1, {[], tables}, &parse_table/2)
+defmodule TTFMetrics.Table.Cmap do
+  require Bitwise
+
+  def parse(<<_version::size(16), tables::size(16), data::binary>>) do
+    Enum.reduce((tables - 1)..0, [], fn id, acc ->
+      <<platform_id::size(16), encoding_id::size(16), offset::size(32)>> =
+        String.slice(data, id * 8, 8)
+
+      offset = offset - 4
+
+      <<_::binary-size(offset), content::binary>> = data
+
+      cmap = sub_cmap(content)
+
+      cmap =
+        cmap
+        |> Map.put(
+          :unicode,
+          (platform_id == 3 && (encoding_id == 1 || encoding_id == 10) && cmap.format != 0) ||
+            (platform_id == 0 && cmap.format != 0)
+        )
+
+      [cmap | acc]
+    end)
+  end
+
+  defp sub_cmap(<<0::size(16), data::binary>>) do
+    <<_::size(16), language::size(16), code_map::binary-size(256), _::binary>> = data
 
     %{
-      version: version,
-      tables: tables |> Enum.reverse()
+      format: 0,
+      language: language,
+      code_map: for(<<x::size(16) <- code_map>>, do: x)
     }
   end
 
-  defp parse_table(
-         _id,
-         {acc, <<platform_id::size(16), encoding_id::size(16), offset::size(32), rest::binary>>}
+  defp sub_cmap(
+         <<4::size(16), length::size(16), language::size(16), segcountx2::size(16), _::size(48),
+           data::binary>>
        ) do
-    offset = offset - 12
+    <<end_code::binary-size(segcountx2), _::size(16), start_code::binary-size(segcountx2),
+      id_delta::binary-size(segcountx2), id_range_offset::binary-size(segcountx2),
+      rest::binary>> = data
 
-    <<_::binary-size(offset), data::binary>> = rest
+    # Count everything we have used, up to now
 
-    {table, rest} = parse_data(data)
+    glyph_offset = 2 + 4 * segcountx2
+    glyph_length = 16 + 4 * segcountx2
+    length = length - glyph_length
 
-    {[
-       %{
-         platform_id: platform_id,
-         encoding_id: encoding_id,
-         format: table.format,
-         language: table.language,
-         code_map: table.code_map
-       }
-       | acc
-     ], rest}
-  end
+    <<_::binary-size(glyph_offset), glyph_ids::binary-size(length), _::binary>> = data
 
-  defp parse_data(
-         <<format::size(16), _::size(16), language::size(16), code_map::binary-size(256),
-           rest::binary>>
-       )
-       when format == 0 do
-    {%{
-       format: format,
-       language: language,
-       code_map: code_map
-     }, rest}
-  end
+    glyph_ids = for(<<x::16 <- glyph_ids>>, do: x)
 
-  defp parse_data(
-         <<format::size(16), length::size(16), language::size(16), seg_countx2::size(16),
-           _::binary-size(6), rest::binary>>
-       )
-       when format == 4 do
-    <<data::binary-size(length), rest::binary>> = rest
+    segcount = div(segcountx2, 2)
 
-    seg_count = seg_countx2 / 2
-
-    glyphlength = length - seg_countx2 * 4 - 16
-
-    <<
-      end_code::binary-size(seg_countx2),
-      _::size(16),
-      start_code::binary-size(seg_countx2),
-      id_delta_unsigned::binary-size(seg_countx2),
-      id_range_offset::binary-size(seg_countx2),
-      glyph::binary-size(glyphlength),
-      _::binary
-    >> = data
-
-    end_code = to_int(end_code)
-
-    start_code = to_int(start_code)
-
-    id_delta = to_signed_int(id_delta_unsigned)
-
-    id_range_offset = to_int(id_range_offset)
-
-    glyph = to_int(glyph)
+    end_code = for(<<x::size(16) <- end_code>>, do: x)
+    start_code = for(<<x::size(16) <- start_code>>, do: x)
+    id_delta = for(<<x::16-signed-integer <- id_delta>>, do: x)
+    id_range_offset = for(<<x::16 <- id_range_offset>>, do: x)
 
     code_map =
-      end_code
-      |> Enum.with_index()
-      |> Enum.reduce(%{}, fn {tail, i}, acc ->
-        Enum.at(start_code, i)..tail
-        |> Enum.reduce(acc, fn code, acc ->
+      Enum.reduce(Enum.with_index(end_code), %{}, fn {tail, i}, acc ->
+        Enum.reduce(Enum.at(start_code, i)..tail, acc, fn code, iacc ->
           glyph_id =
             if Enum.at(id_range_offset, i) == 0 do
               code + Enum.at(id_delta, i)
             else
               index =
-                div(Enum.at(id_range_offset, i), 2) + (code - Enum.at(start_code, i)) -
-                  (seg_count - i)
+                div(Enum.at(id_range_offset, i), 2) +
+                  (code - Enum.at(start_code, i)) - (segcount - 1)
 
-              glyph_id = Enum.at(glyph, index, 0)
-              if glyph_id == 0, do: glyph_id, else: glyph_id + Enum.at(id_delta, i)
+              case Enum.at(glyph_ids, index, 0) do
+                0 -> 0
+                n -> n + Enum.at(id_delta, i)
+              end
             end
 
-          Map.put(acc, code, Bitwise.band(glyph_id, 0xFFFF))
+          Map.put(iacc, code, Bitwise.band(glyph_id, 0xFFFF))
         end)
       end)
 
-    {%{
-       format: format,
-       language: language,
-       code_map: code_map
-     }, rest}
+    %{
+      format: 4,
+      language: language,
+      code_map: code_map
+    }
+
+    # |> IO.inspect(limit: :infinity)
   end
 
-  defp to_int(list) do
-    list
-    |> String.codepoints()
-    |> Enum.chunk_every(2)
-    |> Enum.map(fn [<<a>>, <<b>>] ->
-      <<c::16>> = <<a, b>>
-      c
-    end)
+  defp sub_cmap(
+         <<6::size(16), _::size(16), language::size(16), firstcode::size(16),
+           entrycount::size(16), data::binary>>
+       ) do
+    code_map =
+      Enum.reduce(0..(entrycount - 1), %{}, fn code, acc ->
+        offset = code * 2
+        <<_::binary-size(offset), x::size(16), _::binary>> = data
+        Map.put(acc, code + firstcode, Bitwise.band(x, 0xFFFF))
+      end)
+
+    %{format: 6, language: language, code_map: code_map}
   end
 
-  defp to_signed_int(list) do
-    list
-    |> String.codepoints()
-    |> Enum.chunk_every(2)
-    |> Enum.map(fn [<<a>>, <<b>>] ->
-      <<c::16>> = <<a, b>>
-      # number >= 0x8000 ? -((number ^ 0xFFFF) + 1) : number
+  defp sub_cmap(
+         <<10::size(16), 0::size(16), _::size(64), language::size(32), firstcode::size(32),
+           entrycount::size(32), data::binary>>
+       ) do
+    code_map =
+      Enum.reduce(0..(entrycount - 1), %{}, fn code, acc ->
+        offset = code * 2
+        <<_::binary-size(offset), x::size(16), _::binary>> = data
+        Map.put(acc, code + firstcode, Bitwise.band(x, 0xFFFF))
+      end)
 
-      if c > 0x8000, do: -(Bitwise.bxor(c, 0xFFFF) + 1), else: c
-    end)
+    %{format: 10, language: language, code_map: code_map}
+  end
+
+  defp sub_cmap(
+         <<12::size(16), 0::size(16), _::size(32), language::size(32), groupcount::size(32),
+           data::binary>>
+       ) do
+    code_map =
+      Enum.reduce(1..groupcount, %{}, fn index, acc ->
+        skip = 12 * (index - 1)
+
+        <<_::binary-size(skip), startchar::size(32), endchar::size(32), startglyph::size(32),
+          _::binary>> = data
+
+        Enum.reduce(0..(endchar - startchar), acc, fn offset, iacc ->
+          Map.put(iacc, startchar + offset, startglyph + offset)
+        end)
+      end)
+
+    %{format: 12, language: language, code_map: code_map}
   end
 end

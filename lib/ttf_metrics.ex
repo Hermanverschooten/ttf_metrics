@@ -45,7 +45,7 @@ defmodule TTFMetrics do
   end
 
   defp parse_table("cmap", data) do
-    Table.CMap.parse(data)
+    Table.Cmap.parse(data)
   end
 
   defp parse_table(_, _), do: %{}
