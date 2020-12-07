@@ -48,6 +48,21 @@ defmodule TTFMetrics do
     Table.Cmap.parse(data)
   end
 
+  defp parse_table("head", data) do
+    Table.Head.parse(data)
+  end
+
+  # defp parse_table(name, data) do
+  #   name =
+  #     name
+  #     |> String.downcase()
+  #     |> String.trim()
+
+  #   {:ok, file} = File.open("test/data/#{name}.data", [:write])
+  #   IO.binwrite(file, data)
+  #   File.close(file)
+  # end
+
   defp parse_table(_, _), do: %{}
 
   defp ascent(%{"OS/2" => os2, "hhea" => hhea}) do
